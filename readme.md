@@ -2,6 +2,8 @@
 
 https://blog.csdn.net/yuanlaijike/article/details/80249235
 
+
+
 ### 测试流程
 
 1.创建实体类 domain包
@@ -357,6 +359,41 @@ public class CustomUserDetailsService implements UserDetailsService {
 
         return new User(user.getName(),user.getPassword(),authorities);
     }
+}
+```
+
+### SpringSecurity登录流程
+
+最常用的UsernamePasswordAuthenticationToken
+
+保存了登录用户的基本信息
+
+```java
+
+public class UsernamePasswordAuthenticationFilter extends
+		AbstractAuthenticationProcessingFilter {
+	public UsernamePasswordAuthenticationFilter() {			//添加登录请求路径和提交方式
+		super(new AntPathRequestMatcher("/login", "POST"));
+	}
+	public Authentication attemptAuthentication(HttpServletRequest request,
+			HttpServletResponse response) throws AuthenticationException {
+		String username = obtainUsername(request);
+		String password = obtainPassword(request);
+		UsernamePasswordAuthenticationToken authRequest = new UsernamePasswordAuthenticationToken(
+				username, password);
+		setDetails(request, authRequest);
+		return this.getAuthenticationManager().authenticate(authRequest);
+	}
+	protected String obtainPassword(HttpServletRequest request) {
+		return request.getParameter(passwordParameter);
+	}
+	protected String obtainUsername(HttpServletRequest request) {
+		return request.getParameter(usernameParameter);
+	}
+	protected void setDetails(HttpServletRequest request,
+			UsernamePasswordAuthenticationToken authRequest) {
+		authRequest.setDetails(authenticationDetailsSource.buildDetails(request));
+	}
 }
 ```
 
