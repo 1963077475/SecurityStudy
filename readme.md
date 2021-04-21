@@ -377,11 +377,15 @@ public class UsernamePasswordAuthenticationFilter extends
 	}
 	public Authentication attemptAuthentication(HttpServletRequest request,
 			HttpServletResponse response) throws AuthenticationException {
+        //获取用户和密码 通过obtainUsernama 和obtainPassword方法
 		String username = obtainUsername(request);
 		String password = obtainPassword(request);
+        //构造UsernamePasswordAuthenticationToken对象
 		UsernamePasswordAuthenticationToken authRequest = new UsernamePasswordAuthenticationToken(
 				username, password);
+        //给Detail属性赋值 描述了两个信息 rempteAddress和请求的sessionID
 		setDetails(request, authRequest);
+        //调用authenicate方法进行校验
 		return this.getAuthenticationManager().authenticate(authRequest);
 	}
 	protected String obtainPassword(HttpServletRequest request) {
@@ -397,3 +401,72 @@ public class UsernamePasswordAuthenticationFilter extends
 }
 ```
 
+#### 具体的校验操作
+
+使用ProvicerManager来进行校验操作
+
+```java
+
+public Authentication authenticate(Authentication authentication)
+		throws AuthenticationException {
+    //获取传入的Authentication的类型
+	Class<? extends Authentication> toTest = authentication.getClass();
+	for (AuthenticationProvider provider : getProviders()) {
+        //判断是否支持传入的Authentication 如果支持则使用provider进行校验
+		if (!provider.supports(toTest)) {
+			continue;
+		}
+		result = provider.authenticate(authentication);
+		if (result != null) {
+            //将旧的Token的details属性拷贝到新的Token当中来
+			copyDetails(authentication, result);
+			break;
+		}
+	}
+	if (result == null && parent != null) {
+		result = parentResult = parent.authenticate(authentication);
+	}
+	if (result != null) {
+		if (eraseCredentialsAfterAuthentication
+				&& (result instanceof CredentialsContainer)) {
+			((CredentialsContainer) result).eraseCredentials();
+		}
+		if (parentResult == null) {//将登陆成功的事件广播出去
+			eventPublisher.publishAuthenticationSuccess(result);
+		}
+		return result;
+	}
+	throw lastException;
+}
+```
+
+#### authenticate 认证方法流程
+
+DaoAuthenticationProvider 的authenticate认证方法
+
+```java
+public Authentication authenticate(Authentication authentication)
+		throws AuthenticationException {
+    //首先从authentication中提取出用户名
+	String username = (authentication.getPrincipal() == null) ? "NONE_PROVIDED"
+			: authentication.getName();
+    //这个方法会调用我们自己实现的UserDetailsService的实现类中的loadUserByUsername方法 放回的user就是自己的登陆对象
+	user = retrieveUser(username,(UsernamePasswordAuthenticationToken) authentication);
+    //使用preAuthenticationChecks。check方法检测user的用户状态是否正常 是否被金庸 是否过期
+	preAuthenticationChecks.check(user);
+    //这个方法是对密码进行比较 在实现类中有相应的代码
+	additionalAuthenticationChecks(user,(UsernamePasswordAuthenticationToken) authentication);
+    //检查密码是否过期
+	postAuthenticationChecks.check(user);
+	Object principalToReturn = user;
+	if (forcePrincipalAsString) {
+		principalToReturn = user.getUsername();
+	}
+    //最后构建一个全新的UsernamePasswordToken
+	return 
+        createSuccessAuthentication(principalToReturn, authentication, user);
+}
+
+```
+
+登录来自博客https://blog.csdn.net/minkeyto/article/details/104790771/
