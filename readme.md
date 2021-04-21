@@ -470,3 +470,382 @@ public Authentication authenticate(Authentication authentication)
 ```
 
 登录来自博客https://blog.csdn.net/minkeyto/article/details/104790771/
+
+#### 身份认证流程
+
+`SecurityContextHolder` 存储 `SecurityContext` 对象。
+
+默认是MODE_THREADLOCAL存储在当前的线程中 也可以使用其他的两种存储模式
+
+- MODE_INHERITABLETHREADLOCAL：`SecurityContext` 存储在线程中，但子线程可以获取到父线程中的 `SecurityContext`。
+- MODE_GLOBAL：`SecurityContext` 在所有线程中都相同。
+
+```java
+//获取当前线程中的认证对象
+        SecurityContext context = SecurityContextHolder.getContext();
+        Authentication authentication = context.getAuthentication();
+        //保存认证对象(一般用于自定义认证成功保存认证对象)
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        
+        //清空认证对象(一般用于自定义登出清空认证对象)
+        SecurityContextHolder.clearContext();
+```
+
+#### Authentication
+
+Authentication即认证 辨明当前用户是谁 
+
+```java
+public interface Authentication extends Principal, Serializable {
+    //获取用户权限  一般起你工况下获取到的是用户的角色信息
+    Collection<? extends GrantedAuthority> getAuthorities();
+	//获取证明用户的认证信息 通常情况下获取到的是密码 登陆成功后会被移除
+    Object getCredentials();
+	//获取用户的额外信息 IP地址和SessinID
+    Object getDetails();
+	//获取用户的身份信息 在未认证请跨国下获取到的是用户名在已认证的情况下获取到的是 UserDetails (暂时理解为，当前应用用户对象的扩展)
+    Object getPrincipal();
+	//判断是否是认证过的
+    boolean isAuthenticated();
+	//设置当前是否是认证过的
+    void setAuthenticated(boolean var1) throws IllegalArgumentException;
+}
+```
+
+##### AuthenticationManager、ProviderManager AuthenticationProvider
+
+
+
+AuthenticationManager主要就是完成身份认证的流程
+
+ProvicerManager 是AuthenticationManager具体的实现类
+
+，ProviderManager里面有一个记录AuthenticationProvicer对象的集合属性 providers，AuthenticationProvider接口类里有两个方法
+
+```java
+public interface AuthenticationProvider {
+    //实现具体的身份认证逻辑 认证失败抛出对应异常
+    Authentication authenticate(Authentication var1) throws AuthenticationException;
+	//判断认证类是否支持该Authentication的认证
+    boolean supports(Class<?> var1);
+}
+```
+
+接下来就是遍历 `ProviderManager` 里面的 `providers` 集合，找到和合适的 `AuthenticationProvider` 完成身份认证
+
+
+
+##### UserDetailsService、UserDetails
+
+UserDetailsService是一个接口只有一个方法`loadUserByUserName`
+
+根据用户名查到对应的UserDetails对象
+
+##### 流程
+
+在运行到 `UsernamePasswordAuthenticationFilter` 过滤器的时候首先是进入其父类 `AbstractAuthenticationProcessingFilter` 的 `doFilter()` 方法中
+
+```java
+private void doFilter(HttpServletRequest request, HttpServletResponse response, FilterChain chain) throws IOException, ServletException {
+    //判断是否是配置的身份认证的URI
+        if (!this.requiresAuthentication(request, response)) {
+            chain.doFilter(request, response);
+        } else {
+            try {
+                //关键方法实现认证逻辑 并且返回Authentication由其字类UsernamePasswordAuthenticatioinFilter实现
+                Authentication authenticationResult = this.attemptAuthentication(request, response);
+                if (authenticationResult == null) {
+                    return;
+                }
+
+                this.sessionStrategy.onAuthentication(authenticationResult, request, response);
+                
+                if (this.continueChainBeforeSuccessfulAuthentication) {
+                    chain.doFilter(request, response);
+                }
+				//认证成功
+                this.successfulAuthentication(request, response, chain, authenticationResult);
+            } catch (InternalAuthenticationServiceException var5) {
+                this.logger.error("An internal error occurred while trying to authenticate the user.", var5);
+                this.unsuccessfulAuthentication(request, response, var5);
+            } catch (AuthenticationException var6) {
+                this.unsuccessfulAuthentication(request, response, var6);
+            }
+
+        }
+    }
+```
+
+##### 认证失败处理逻辑
+
+```java
+
+protected void unsuccessfulAuthentication(...) {
+    	//首先清除认证对象
+		SecurityContextHolder.clearContext();
+		this.rememberMeServices.loginFail(request, response);
+    //这个方法处理认证失败页面跳转和相应逻辑 默认使用的是SimpleUrlAuthenticationFailureHandler实现类 可以自定义
+        this.failureHandler.onAuthenticationFailure(request, response, failed);
+}
+  
+```
+
+###### SampleUriAuthenticationFailureHandler
+
+```java
+public void onAuthenticationFailure(HttpServletRequest request, HttpServletResponse response, AuthenticationException exception) throws IOException, ServletException {
+    //如果没有配置默认登录失败跳转地址 直接相应错误
+        if (this.defaultFailureUrl == null) {
+            if (this.logger.isTraceEnabled()) {
+                this.logger.trace("Sending 401 Unauthorized error since no failure URL is set");
+            } else {
+                this.logger.debug("Sending 401 Unauthorized error");
+            }
+
+            response.sendError(HttpStatus.UNAUTHORIZED.value(), HttpStatus.UNAUTHORIZED.getReasonPhrase());
+        } else {
+            //否则缓存异常
+            this.saveException(request, exception);
+            //根据跳转的页面是转发还是重定向进行不同方式的跳转
+            if (this.forwardToDestination) {
+                this.logger.debug("Forwarding to " + this.defaultFailureUrl);
+                request.getRequestDispatcher(this.defaultFailureUrl).forward(request, response);
+            } else {
+                this.redirectStrategy.sendRedirect(request, response, this.defaultFailureUrl);
+            }
+
+        }
+    }
+//缓存异常的方法
+protected final void saveException(HttpServletRequest request, AuthenticationException exception) {
+    	//转发存储在request里
+        if (this.forwardToDestination) {
+            request.setAttribute("SPRING_SECURITY_LAST_EXCEPTION", exception);
+        } else {
+            //重定向存储在Session里
+            HttpSession session = request.getSession(false);
+            if (session != null || this.allowSessionCreation) {
+                request.getSession().setAttribute("SPRING_SECURITY_LAST_EXCEPTION", exception);
+            }
+
+        }
+    }
+
+```
+
+##### 认证成功处理逻辑
+
+successfulAuthentication方法
+
+```java
+protected void successfulAuthentication(HttpServletRequest request, HttpServletResponse response, FilterChain chain, Authentication authResult) throws IOException, ServletException {
+    	//将认证完成的Authentication对象保存到当前线程的SecurityContext中
+        SecurityContextHolder.getContext().setAuthentication(authResult);
+        if (this.logger.isDebugEnabled()) {
+            this.logger.debug(LogMessage.format("Set SecurityContextHolder to %s", authResult));
+        }
+
+        this.rememberMeServices.loginSuccess(request, response, authResult);
+        if (this.eventPublisher != null) {
+            this.eventPublisher.publishEvent(new InteractiveAuthenticationSuccessEvent(authResult, this.getClass()));
+        }
+		//这个handler是为了完成登陆成功之后的页面跳转 默认使用SavedRequestAwareAuthenticationSuccessHandler 可以自定义
+        this.successHandler.onAuthenticationSuccess(request, response, authResult);
+    }
+```
+
+
+
+#### 身份认证详情
+
+UsernamePasswordAuthenticationFilter
+
+```java
+//这个方法完成的就是身份认证的逻辑
+public Authentication attemptAuthentication(HttpServletRequest request, HttpServletResponse response) throws AuthenticationException {
+        if (this.postOnly && !request.getMethod().equals("POST")) {
+            throw new AuthenticationServiceException("Authentication method not supported: " + request.getMethod());
+        } else {
+            String username = this.obtainUsername(request);
+            username = username != null ? username : "";
+            username = username.trim();
+            String password = this.obtainPassword(request);
+            password = password != null ? password : "";
+            //将前端传过来的用户和密码封装成一个UsernamePasswordAuthenticationToken类
+            UsernamePasswordAuthenticationToken authRequest = new UsernamePasswordAuthenticationToken(username, password);
+            this.setDetails(request, authRequest);
+            //然后将具体的认证逻辑交给AuthenticationManager进行认证 默认使用的是ProviderManager 
+            return this.getAuthenticationManager().authenticate(authRequest);
+        }
+    }
+```
+
+ProvideManager
+
+```java
+public class ProviderManager implements AuthenticationManager, MessageSourceAware,
+        InitializingBean {
+    ...
+    private List<AuthenticationProvider> providers = Collections.emptyList();
+    ...
+    
+    public Authentication authenticate(Authentication authentication)
+            throws AuthenticationException {
+        ....
+        //遍历所有的 AuthenticationProvider, 找到合适的完成身份验证
+        for (AuthenticationProvider provider : getProviders()) {
+            if (!provider.supports(toTest)) {
+                continue;
+            }
+            ...
+            try {
+                //进行具体的身份验证逻辑, 这里使用到的是 DaoAuthenticationProvider, 具体逻辑记着往下看
+                result = provider.authenticate(authentication);
+
+                if (result != null) {
+                    copyDetails(authentication, result);
+                    break;
+                }
+            }
+            catch 
+            ...
+        }
+        ...
+        throw lastException;
+    }
+}
+```
+
+DaoAUthenticationProvider继承自AbstractUserDetailsAuthenticationProvider 但是没有自己的认证方法 所以会调用父类的authenticate方法来完成认证
+
+AbstractUserDetailsAuthenticationProvider 
+
+```java
+ public Authentication authenticate(Authentication authentication) throws AuthenticationException {
+     //断言 如果不是UsernamePasswordAuthenticationToken的实现就会返回
+        Assert.isInstanceOf(UsernamePasswordAuthenticationToken.class, authentication, () -> {
+            return this.messages.getMessage("AbstractUserDetailsAuthenticationProvider.onlySupports", "Only UsernamePasswordAuthenticationToken is supported");
+        });
+     //获取用户名
+        String username = this.determineUsername(authentication);
+        boolean cacheWasUsed = true;
+     //根据用户名从缓存中查找UserDetails
+        UserDetails user = this.userCache.getUserFromCache(username);
+        if (user == null) {
+            cacheWasUsed = false;
+
+            try {
+                //如果缓存中没有则就通过retrieveUser方法来查找(看下面 DaoAuthenticationProvider 的实现)
+                user = this.retrieveUser(username, (UsernamePasswordAuthenticationToken)authentication);
+            } 
+            ....
+            ....
+        try {
+             //比对前的检查,例如账户以一些状态信息(是否锁定, 过期...)
+            this.preAuthenticationChecks.check(user);
+            //子类实现比对规则 (看下面 DaoAuthenticationProvider 的实现)
+            this.additionalAuthenticationChecks(user, (UsernamePasswordAuthenticationToken)authentication);
+        } catch (AuthenticationException var7) {
+            if (!cacheWasUsed) {
+                throw var7;
+            }
+
+            cacheWasUsed = false;
+            user = this.retrieveUser(username, (UsernamePasswordAuthenticationToken)authentication);
+            this.preAuthenticationChecks.check(user);
+            this.additionalAuthenticationChecks(user, (UsernamePasswordAuthenticationToken)authentication);
+        }
+
+        this.postAuthenticationChecks.check(user);
+        if (!cacheWasUsed) {
+            this.userCache.putUserInCache(user);
+        }
+
+        Object principalToReturn = user;
+        if (this.forcePrincipalAsString) {
+            principalToReturn = user.getUsername();
+        }
+//根据最终user的一些信息重新生成具体详细的 Authentication 对象并返回 
+        return this.createSuccessAuthentication(principalToReturn, authentication, user);
+    }
+```
+
+DaoAUthenticationProvider中的三个重要方法
+
+retrieveUser----》获取需要比对的UserDetails
+
+比对方式--》additionalAuthenticationChecks
+
+返回最终的Authentication对象---》createSuccessAuthentication
+
+additionalAuthenticationChecks
+
+```java
+//密码比对 
+protected void additionalAuthenticationChecks(UserDetails userDetails, UsernamePasswordAuthenticationToken authentication) throws AuthenticationException {
+     //如果密码为空返回一场
+        if (authentication.getCredentials() == null) {
+            this.logger.debug("Failed to authenticate since no credentials provided");
+            throw new BadCredentialsException(this.messages.getMessage("AbstractUserDetailsAuthenticationProvider.badCredentials", "Bad credentials"));
+        } else {
+            //不为空通过从缓存中获取或者数据库中获取的USer对象进行密码比对
+            String presentedPassword = authentication.getCredentials().toString();
+            if (!this.passwordEncoder.matches(presentedPassword, userDetails.getPassword())) {
+                this.logger.debug("Failed to authenticate since password does not match stored value");
+                throw new BadCredentialsException(this.messages.getMessage("AbstractUserDetailsAuthenticationProvider.badCredentials", "Bad credentials"));
+            }
+        }
+    }
+
+```
+
+retrieveUsser
+
+```java
+//通过 UserDetailsService 获取 UserDetails
+    protected final UserDetails retrieveUser(String username,
+            UsernamePasswordAuthenticationToken authentication)
+            throws AuthenticationException {
+        prepareTimingAttackProtection();
+        try {
+            //通过 UserDetailsService 获取 UserDetails
+            UserDetails loadedUser = this.getUserDetailsService().loadUserByUsername(username);
+            if (loadedUser == null) {
+                throw new InternalAuthenticationServiceException(
+                        "UserDetailsService returned null, which is an interface contract violation");
+            }
+            return loadedUser;
+        }
+        catch (UsernameNotFoundException ex) {
+            mitigateAgainstTimingAttack(authentication);
+            throw ex;
+        }
+        catch (InternalAuthenticationServiceException ex) {
+            throw ex;
+        }
+        catch (Exception ex) {
+            throw new InternalAuthenticationServiceException(ex.getMessage(), ex);
+        }
+    }
+```
+
+createSuccessAuthentication
+
+```java
+ //生成身份认证通过后最终返回的 Authentication, 记录认证的身份信息
+    @Override
+    protected Authentication createSuccessAuthentication(Object principal,
+            Authentication authentication, UserDetails user) {
+        boolean upgradeEncoding = this.userDetailsPasswordService != null
+                && this.passwordEncoder.upgradeEncoding(user.getPassword());
+        if (upgradeEncoding) {
+            String presentedPassword = authentication.getCredentials().toString();
+            String newPassword = this.passwordEncoder.encode(presentedPassword);
+            user = this.userDetailsPasswordService.updatePassword(user, newPassword);
+        }
+        //将正确的密码放入Authentication对象中进行返回
+        return super.createSuccessAuthentication(principal, authentication, user);
+    }
+}
+```
+

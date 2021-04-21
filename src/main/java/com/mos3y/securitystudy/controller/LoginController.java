@@ -3,6 +3,8 @@ package com.mos3y.securitystudy.controller;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -15,6 +17,14 @@ public class LoginController {
     public String showHome(){
         String name= SecurityContextHolder.getContext().getAuthentication().getName();
         logger.info("当前登录用户:"+name);
+        //获取当前线程中的认证对象
+        SecurityContext context = SecurityContextHolder.getContext();
+        Authentication authentication = context.getAuthentication();
+        //保存认证对象(一般用于自定义认证成功保存认证对象)
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        //清空认证对象(一般用于自定义登出清空认证对象)
+        SecurityContextHolder.clearContext();
         return "home";
     }
     @RequestMapping("/login")
