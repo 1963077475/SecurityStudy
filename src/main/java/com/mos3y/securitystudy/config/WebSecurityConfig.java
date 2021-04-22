@@ -2,14 +2,27 @@ package com.mos3y.securitystudy.config;
 
 import com.mos3y.securitystudy.service.CustomUserDetailsService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.builders.WebSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.authentication.WebAuthenticationDetails;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 1.标识为配置类
@@ -56,7 +69,43 @@ public class WebSecurityConfig extends WebSecurityConfigurerAdapter {
                 return encodedPassword.equals(rawPassword.toString()); //密码校验
             }
         });
+    }
+    @Bean
+    public AuthenticationProvider authenticationProvider(){
+        //实现自定义AuthenticationProvider
+        return new AuthenticationProvider() {
+            //实现认证方法
+            @Override
+            public Authentication authenticate(Authentication authentication) throws AuthenticationException {
+                //默认的details包含用户的Ip和sessionId
+                WebAuthenticationDetails details= (WebAuthenticationDetails) authentication.getDetails();
+                String username = authentication.getPrincipal().toString();
+                String password = authentication.getCredentials().toString();
+                System.out.println(username);
+                System.out.println(password);
+                //验证密码是否为123
+                if(!password.equals("123")){
+                    throw new BadCredentialsException("密码错误");
+                }
+                List<GrantedAuthority> authorities=new ArrayList<>();
+                //认证通过同数据库中查询用户权限
+                authorities.add(new SimpleGrantedAuthority("ROLE_role1"));
+                //生车工认证的Authentication 系统会写入SecurityContext
 
-
+                return new UsernamePasswordAuthenticationToken(username,password,authorities);
+            }
+            //检查入参Authentication是否是UsernamePasswordAuthenticationToken或者他的子类
+            @Override
+            public boolean supports(Class<?> authentication) {
+                //isAssignableFrom 是从类继承的角度去判断 instanceof关键字是从实例继承的角度去判断
+                //isAssignableFrom 方法判断是否是某个类的父类 instanceof关键字判断是否是梅格雷的子类
+                /**
+                 * 父类.class.isAssignableFrom(子类.class)
+                 *
+                 * 子类实例 instanceof 父类类型
+                 */
+                return (UsernamePasswordAuthenticationToken.class.isAssignableFrom(authentication));
+            }
+        };
     }
 }
